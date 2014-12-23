@@ -1,6 +1,7 @@
 package com.worthed.view;
 
 import android.content.Context;
+import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
@@ -8,6 +9,11 @@ import android.view.ViewConfiguration;
 import android.widget.Adapter;
 import android.widget.AdapterView;
 
+import java.util.LinkedList;
+
+/**
+ * 水平ListView
+ */
 public class HorizonListView extends AdapterView<Adapter> {
 
     // 新添加的所有子视图在当前最当前最后一个子视图后添加的布局模型
@@ -21,6 +27,8 @@ public class HorizonListView extends AdapterView<Adapter> {
     private static final int TOUCH_MODE_DOWN = 0;
     // 滚动模式
     private static final int TOUCH_MODE_SCROLL = 1;
+
+    private static final int INVALID_INDEX = -1;
 
     // 视图和数据适配
     private Adapter mAdapter;
@@ -39,6 +47,12 @@ public class HorizonListView extends AdapterView<Adapter> {
     private int mTouchStartY;
     private int mMotionX;
     private int mTouchSlop;
+
+    // View复用当前仅支持一种类型Item视图复用
+    // 想更多了解ListView视图如何复用可以看AbsListView内部类RecycleBin
+    private final LinkedList<View> mCachedItemViews = new LinkedList<View>();
+    private Runnable mLongPressRunnable;
+    private Rect mRect;
 
     public HorizonListView(Context context) {
         super(context);
@@ -99,7 +113,8 @@ public class HorizonListView extends AdapterView<Adapter> {
             fillListDown(mListLeft, 0);
         } else {
             final int offset = mListLeft + mListLeftOffset - getChildAt(0).getLeft();
-            // remove
+            // 移除可视区域的都干掉
+            removeNonVisibleViews(offset);
             fillList(offset);
         }
 
@@ -122,7 +137,7 @@ public class HorizonListView extends AdapterView<Adapter> {
             mLastItemPosition++;
             // 数据和视图通过Adapter适配，此处从Adapter获取视图。
             // 第二个参数传入复用的View对象，先出入null，之后再添加View对象复用机制
-            View newBottomChild = mAdapter.getView(mLastItemPosition, null, this);
+            View newBottomChild = mAdapter.getView(mLastItemPosition, getCachedView(), this);
             // **具体添加视图处理
             addAndMeasureChild(newBottomChild, LAYOUT_MODE_RIGHT);
             // 添加一个子视图(Item)，随之底部边界也发生改变
@@ -172,6 +187,22 @@ public class HorizonListView extends AdapterView<Adapter> {
     }
 
     @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        switch (ev.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                startTouch(ev);
+                return false;
+
+            case MotionEvent.ACTION_HOVER_MOVE:
+                return startScrollIfNeeded((int)ev.getY());
+
+            default:
+                endTouch();
+                return false;
+        }
+    }
+
+    @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (getChildCount() == 0) {
             return false;
@@ -193,6 +224,11 @@ public class HorizonListView extends AdapterView<Adapter> {
                 break;
 
             case MotionEvent.ACTION_UP:
+                // 如果当前触摸没有触发滚动，状态依然是DOWN
+                // 说明是点击某一个Item
+                if (mTouchMode == TOUCH_MODE_DOWN) {
+                    clickChildAt((int)event.getX(), (int) event.getY());
+                }
                 break;
 
             default:
@@ -247,7 +283,7 @@ public class HorizonListView extends AdapterView<Adapter> {
             // 现在添加的视图时当前子视图后面，所以位置+1
             mLastItemPosition--;
 
-            View newTopChild = mAdapter.getView(mFirstItemPosition, null, this);
+            View newTopChild = mAdapter.getView(mFirstItemPosition, getCachedView(), this);
             addAndMeasureChild(newTopChild, LAYOUT_MODE_LEFT);
             int childWidth = newTopChild.getMeasuredWidth();
             leftEdge -= childWidth;
@@ -261,6 +297,8 @@ public class HorizonListView extends AdapterView<Adapter> {
         mMotionX = mTouchStartX = (int) event.getX();
 
         mListLeftStart = getChildAt(0).getLeft() - mListLeftOffset;
+
+        startLongPressCheck();
 
         mTouchMode = TOUCH_MODE_DOWN;
     }
@@ -279,6 +317,158 @@ public class HorizonListView extends AdapterView<Adapter> {
         }
 
         return false;
+    }
+
+    /**
+     * 开启异步线程，条件允许时调用LongClickListener
+     */
+    private void startLongPressCheck() {
+        // 创建子线程
+        if (mLongPressRunnable == null) {
+            mLongPressRunnable = new Runnable() {
+
+                @Override
+                public void run() {
+                    if (mTouchMode == TOUCH_MODE_DOWN) {
+                        final int index = getContainingChildIndex(
+                                mTouchStartX, mTouchStartY);
+                        if (index != INVALID_INDEX) {
+                            longClickChild(index);
+                        }
+                    }
+                }
+            };
+        }
+
+        // ViewConfiguration.getLongPressTimeout() 获取系统配置的长按的时间间隔
+        // 如果点击已经超过长按要求时间，才开始执行此线程
+        postDelayed(mLongPressRunnable, ViewConfiguration.getLongPressTimeout());
+    }
+
+    /**
+     * 调用ItemLongClickListener提供点击位置等信息
+     *
+     * @param index Item索引值
+     */
+    private void longClickChild(final int index) {
+        final View itemView = getChildAt(index);
+        final int position = mFirstItemPosition + index;
+        final long id = mAdapter.getItemId(position);
+        // 从父类获取绑定的OnItemLongClickListener
+        OnItemLongClickListener listener = getOnItemLongClickListener();
+
+        if (listener != null) {
+            listener.onItemLongClick(this, itemView, position, id);
+        }
+    }
+
+    /**
+     * 调用ItemClickListener提供当前点击位置
+     *
+     * @param x 触摸点X轴值
+     * @param y 触摸点Y轴值
+     */
+    private void clickChildAt(int x, int y) {
+        // 触摸点在当前显示所有Item中哪一个
+        final int itemIndex = getContainingChildIndex(x, y);
+
+        if (itemIndex != INVALID_INDEX) {
+            final View itemView = getChildAt(itemIndex);
+            // 当前Item在ListView所有Item中的位置
+            final int position = mFirstItemPosition + itemIndex;
+            final long id = mAdapter.getItemId(position);
+
+            // 调用父类方法，会触发ListView ItemClickListener
+            performItemClick(itemView, position, id);
+        }
+    }
+
+    /**
+     * 删除当前已经移除可视范围的Item View
+     *
+     * @param offset 可视区域偏移量
+     */
+    private void removeNonVisibleViews(final int offset) {
+        int childCount = getChildCount();
+
+        /**  ListView向上滚动，删除顶部移除可视区域的所有视图  **/
+
+        // 不在ListView底部，子视图大于1
+        if (mLastItemPosition != mAdapter.getCount() -1 && childCount > 1) {
+            View firstChild = getChildAt(0);
+            // 通过第二条件判断当前最上面的视图是否被移除可是区域
+            while (firstChild != null && firstChild.getBottom() + offset < 0) {
+                // 既然顶部第一个视图已经移除可视区域从当前ViewGroup中删除掉
+                removeViewInLayout(firstChild);
+                // 用于下次判断，是否当前顶部还有需要移除的视图
+                childCount--;
+                // View对象回收，目的是为了复用
+                mCachedItemViews.addLast(firstChild);
+                // 既然最上面的视图被干掉了，当前ListView第一个显示视图也需要+1
+                mFirstItemPosition++;
+                // 同上更新
+                mListLeftOffset += firstChild.getMeasuredHeight();
+
+                // 为下一次while遍历获取参数
+                if (childCount > 1) {
+                    // 当前已经删除第一个，再接着去除删除后剩余的第一个
+                    firstChild = getChildAt(0);
+                } else {
+                    // 没啦
+                    firstChild = null;
+                }
+            }
+        }
+
+
+        /**  ListView向下滚动，删除底部移除可视区域的所有视图  **/
+        // 与上面操作一样，只是方向相反一个顶部操作一个底部操作
+        if (mFirstItemPosition != 0 && childCount > 1) {
+            View lastChild = getChildAt(childCount - 1);
+            while (lastChild != null && lastChild.getTop() + offset > getHeight()) {
+                removeViewInLayout(lastChild);
+                childCount--;
+                mCachedItemViews.addLast(lastChild);
+                mLastItemPosition--;
+
+                if (childCount > 1) {
+                    lastChild = getChildAt(childCount - 1);
+                } else {
+                    lastChild = null;
+                }
+            }
+        }
+
+    }
+
+
+    /**
+     * 获取一个可以复用的Item View
+     *
+     * @return view 可以复用的视图或者null
+     */
+    private View getCachedView() {
+
+        if (mCachedItemViews.size() != 0) {
+            return mCachedItemViews.removeFirst();
+        }
+
+        return null;
+    }
+
+    private int getContainingChildIndex(int x, int y) {
+        if (mRect == null) {
+            mRect = new Rect();
+        }
+
+        for (int i = 0; i < getChildCount(); i++) {
+            getChildAt(i).getHitRect(mRect);
+            if (mRect.contains(x, y)) {
+                return i;
+            }
+        }
+
+        return INVALID_POSITION;
     }
 
 }

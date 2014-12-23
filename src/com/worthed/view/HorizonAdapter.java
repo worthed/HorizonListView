@@ -14,6 +14,8 @@ import android.widget.TextView;
 import java.util.List;
 
 /**
+ * 水平ListView适配器
+ *
  * Created by zhenguo on 12/23/14.
  */
 public class HorizonAdapter extends BaseAdapter {
