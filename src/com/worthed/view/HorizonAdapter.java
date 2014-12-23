@@ -3,11 +3,13 @@ package com.worthed.view;
 import android.content.Context;
 import android.graphics.Color;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AbsListView;
 import android.widget.BaseAdapter;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 import java.util.List;
 
@@ -18,10 +20,12 @@ public class HorizonAdapter extends BaseAdapter {
 
     private Context context;
     private List<Integer> resIdList;
+    private LayoutInflater mInflater;
 
     public HorizonAdapter(Context context, List<Integer> resId) {
         Log.d("HorizonListView", "HorizonAdapter()");
         this.context = context;
+        mInflater = LayoutInflater.from(context);
         this.resIdList = resId;
     }
 
@@ -34,8 +38,8 @@ public class HorizonAdapter extends BaseAdapter {
     }
 
     @Override
-    public Integer getItem(int position) {
-        return resIdList.get(position);
+    public String getItem(int position) {
+        return "" + position;
     }
 
     @Override
@@ -47,10 +51,13 @@ public class HorizonAdapter extends BaseAdapter {
     public View getView(int position, View convertView, ViewGroup parent) {
 
         Log.d("HorizonListView", "getView() position : " + position);
-        ImageView iv = new ImageView(context);
-        iv.setBackgroundColor(Color.RED);
-        iv.setImageResource(getItem(position));
+        if (convertView == null) {
+            convertView = mInflater.inflate(R.layout.list_item, null);
+        }
 
-        return iv;
+        TextView name = (TextView) convertView.findViewById(R.id.tv_name);
+        name.setText(getItem(position));
+
+        return convertView;
     }
 }

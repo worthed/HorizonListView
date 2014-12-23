@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
+    android:orientation="vertical"
     android:background="#ffff00"
+    android:gravity="center"
     android:padding="15dip" >
 
     <ImageView
@@ -15,9 +17,9 @@
         android:id="@+id/tv_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_centerVertical="true"
+        android:gravity="center"
+        android:layout_gravity="center_horizontal"
         android:layout_marginLeft="10dip"
-        android:layout_toRightOf="@id/iv_photo"
-        android:textSize="16dip" />
+        android:textSize="16sp" />
 
-</RelativeLayout>
+</LinearLayout>
