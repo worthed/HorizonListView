@@ -105,16 +105,16 @@ public class HorizonListView extends AdapterView<Adapter> {
             return;
         }
 
-        /*if (scroller.computeScrollOffset()) {
+        if (scroller.computeScrollOffset()) {
             int scrollx = scroller.getCurrX();
             mListLeft = scrollx;
         }
 
-        if (mListLeft <= 0) {
+        /*if (mListLeft <= 0) {
             mListLeft = 0;
             scroller.forceFinished(true);
-        }
-        if (mListLeft >= maxX) {
+        }*/
+        /*if (mListLeft >= maxX) {
             mListLeft = maxX;
             scroller.forceFinished(true);
         }*/
@@ -139,7 +139,7 @@ public class HorizonListView extends AdapterView<Adapter> {
         // draw， 上面子视图都添加完了，重绘布局把子视图绘制出来吧
         invalidate();
 
-        /*if (!scroller.isFinished()) {
+        if (!scroller.isFinished()) {
             post(new Runnable() {
                 @Override
                 public void run() {
@@ -147,7 +147,7 @@ public class HorizonListView extends AdapterView<Adapter> {
                 }
             });
 
-        }*/
+        }
     }
 
     /**
@@ -168,6 +168,7 @@ public class HorizonListView extends AdapterView<Adapter> {
             // 添加一个子视图(Item)，随之底部边界也发生改变
             bottomEdge += newBottomChild.getMeasuredWidth();
         }
+
     }
 
     /**
@@ -185,9 +186,9 @@ public class HorizonListView extends AdapterView<Adapter> {
         final int index = layoutMode == LAYOUT_MODE_LEFT ? 0 : -1;
         addViewInLayout(child, index, params, true);
 
-        final int itemWidth = getHeight();
+        final int itemHeight = getHeight();
         // 位运算 | itemWidth表示添加此当前值
-        child.measure(MeasureSpec.UNSPECIFIED, MeasureSpec.EXACTLY | itemWidth);
+        child.measure(MeasureSpec.UNSPECIFIED, MeasureSpec.EXACTLY | itemHeight);
     }
 
 
@@ -196,7 +197,8 @@ public class HorizonListView extends AdapterView<Adapter> {
      */
     private void positionItems() {
         int left = mListLeft + mListLeftOffset;
-        // left = mNextX;
+
+        Log.d("HorizonListView", "left : " + left);
 
         for (int i = 0; i < getChildCount(); i++) {
             final View child = getChildAt(i);
@@ -210,7 +212,6 @@ public class HorizonListView extends AdapterView<Adapter> {
             child.layout(left, top, left + width, top + height);
             left += width;
         }
-        maxX = left;
     }
 
     @Override
@@ -375,6 +376,12 @@ public class HorizonListView extends AdapterView<Adapter> {
             }
         }
 
+        // 这里有问题
+        if (childCount > 1) {
+            maxX = mAdapter.getCount() * getChildAt(0).getMeasuredWidth() - getWidth();
+            Log.d("HorizonListView", "maxX : " + maxX);
+        }
+
     }
 
 
@@ -421,8 +428,8 @@ public class HorizonListView extends AdapterView<Adapter> {
 
         @Override
         public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
-            Log.d("HorizonListView", "onScroll()");
             mListLeft -= distanceX;
+            Log.d("HorizonListView", "onScroll() left : " + mListLeft);
             requestLayout();
             return super.onScroll(e1, e2, distanceX, distanceY);
 
@@ -431,7 +438,7 @@ public class HorizonListView extends AdapterView<Adapter> {
         @Override
         public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
             Log.d("HorizonListView", "onFling()");
-            scroller.fling(mListLeft, 0, (int) velocityX, 0, 0, 0, maxX, 0);
+            scroller.fling(mListLeft, 0, (int) velocityX, 0, -maxX, 0, 0, 0);
             requestLayout();
             return true;
         }
