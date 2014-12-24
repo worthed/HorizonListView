@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.widget.AdapterView;
+import android.widget.ListView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
@@ -37,6 +38,8 @@ public class DemoActivity extends Activity implements AdapterView.OnItemClickLis
         horizon_list_view.setAdapter(horizonAdapter);
         horizon_list_view.setOnItemClickListener(this);
         horizon_list_view.setOnItemLongClickListener(this);
+
+        ListView lv;
     }
 
     @Override

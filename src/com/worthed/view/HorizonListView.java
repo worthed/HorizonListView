@@ -3,11 +3,14 @@ package com.worthed.view;
 import android.content.Context;
 import android.graphics.Rect;
 import android.util.AttributeSet;
+import android.util.Log;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.widget.Adapter;
 import android.widget.AdapterView;
+import android.widget.Scroller;
 
 import java.util.LinkedList;
 
@@ -20,13 +23,6 @@ public class HorizonListView extends AdapterView<Adapter> {
     private static final int LAYOUT_MODE_RIGHT = 0;
     // 与LAYOUT_MODE_BELOW相反方向添加的布局模型
     private static final int LAYOUT_MODE_LEFT = 1;
-
-    // 初始模式，用户还未接触ListView
-    private static final int TOUCH_MODE_REST = -1;
-    // 触摸Down事件模式
-    private static final int TOUCH_MODE_DOWN = 0;
-    // 滚动模式
-    private static final int TOUCH_MODE_SCROLL = 1;
 
     private static final int INVALID_INDEX = -1;
 
@@ -42,17 +38,20 @@ public class HorizonListView extends AdapterView<Adapter> {
     private int mListLeftOffset;
     private int mListLeftStart;
 
-    private int mTouchMode = TOUCH_MODE_REST;
     private int mTouchStartX;
     private int mTouchStartY;
-    private int mMotionX;
-    private int mTouchSlop;
 
     // View复用当前仅支持一种类型Item视图复用
     // 想更多了解ListView视图如何复用可以看AbsListView内部类RecycleBin
     private final LinkedList<View> mCachedItemViews = new LinkedList<View>();
     private Runnable mLongPressRunnable;
     private Rect mRect;
+
+    private Scroller scroller;
+
+    private GestureDetector gestureDetector;
+
+    private int maxX = Integer.MAX_VALUE;
 
     public HorizonListView(Context context) {
         super(context);
@@ -70,8 +69,8 @@ public class HorizonListView extends AdapterView<Adapter> {
     }
 
     private void initListView(Context context) {
-        final ViewConfiguration configuration = ViewConfiguration.get(context);
-        mTouchSlop = configuration.getScaledTouchSlop();
+        gestureDetector = new GestureDetector(context, new GestureListener());
+        scroller = new Scroller(context);
     }
 
     @Override
@@ -106,6 +105,20 @@ public class HorizonListView extends AdapterView<Adapter> {
             return;
         }
 
+        /*if (scroller.computeScrollOffset()) {
+            int scrollx = scroller.getCurrX();
+            mListLeft = scrollx;
+        }
+
+        if (mListLeft <= 0) {
+            mListLeft = 0;
+            scroller.forceFinished(true);
+        }
+        if (mListLeft >= maxX) {
+            mListLeft = maxX;
+            scroller.forceFinished(true);
+        }*/
+
         // 当前ListView没有任何子视图(Item)，所以依次在从上向下填充子视图
         if (getChildCount() == 0) {
             mLastItemPosition = -1;
@@ -113,16 +126,28 @@ public class HorizonListView extends AdapterView<Adapter> {
             fillListDown(mListLeft, 0);
         } else {
             final int offset = mListLeft + mListLeftOffset - getChildAt(0).getLeft();
+            // final int offset = mNextX - getChildAt(0).getLeft();
             // 移除可视区域的都干掉
             removeNonVisibleViews(offset);
             fillList(offset);
         }
 
+
         // layout，添加测量完后，获取视图摆放位置
-        positioinItems();
+        positionItems();
 
         // draw， 上面子视图都添加完了，重绘布局把子视图绘制出来吧
         invalidate();
+
+        /*if (!scroller.isFinished()) {
+            post(new Runnable() {
+                @Override
+                public void run() {
+                    requestLayout();
+                }
+            });
+
+        }*/
     }
 
     /**
@@ -169,8 +194,9 @@ public class HorizonListView extends AdapterView<Adapter> {
     /**
      * 对所有子视图进行layout操作，取得所有子视图正确的位置
      */
-    private void positioinItems() {
+    private void positionItems() {
         int left = mListLeft + mListLeftOffset;
+        // left = mNextX;
 
         for (int i = 0; i < getChildCount(); i++) {
             final View child = getChildAt(i);
@@ -184,22 +210,7 @@ public class HorizonListView extends AdapterView<Adapter> {
             child.layout(left, top, left + width, top + height);
             left += width;
         }
-    }
-
-    @Override
-    public boolean onInterceptTouchEvent(MotionEvent ev) {
-        switch (ev.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                startTouch(ev);
-                return false;
-
-            case MotionEvent.ACTION_HOVER_MOVE:
-                return startScrollIfNeeded((int)ev.getY());
-
-            default:
-                endTouch();
-                return false;
-        }
+        maxX = left;
     }
 
     @Override
@@ -207,54 +218,25 @@ public class HorizonListView extends AdapterView<Adapter> {
         if (getChildCount() == 0) {
             return false;
         }
-
-        final int x = (int) event.getX();
-
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                startTouch(event);
-                break;
-
-            case MotionEvent.ACTION_MOVE:
-                if (mTouchMode == TOUCH_MODE_DOWN) {
-                    startScrollIfNeeded(x);
-                } else if (mTouchMode == TOUCH_MODE_SCROLL) {
-                    scrollList(x);
-                }
-                break;
-
-            case MotionEvent.ACTION_UP:
-                // 如果当前触摸没有触发滚动，状态依然是DOWN
-                // 说明是点击某一个Item
-                if (mTouchMode == TOUCH_MODE_DOWN) {
-                    clickChildAt((int)event.getX(), (int) event.getY());
-                }
-                break;
-
-            default:
-                endTouch();
-                break;
-        }
-
-        return true;
+        return gestureDetector.onTouchEvent(event);
     }
 
-    /**
-     * 控制ListView进行滚动
-     *
-     * @param x 当前触摸点Y轴的值
-     */
-    private void scrollList(int x) { // scrollIfNeeded
-        // 当前手指坐在位置与刚触摸到屏幕之间的距离
-        // 也就是当前手指在屏幕上Y轴总移动位置
-        int scrolledDistance = x - mTouchStartX;
-        // 改变当前记录的ListView顶部位置
-        mListLeft = mListLeftStart + scrolledDistance;
-
-        // 关键，要想使相面的计算生效必须重新请求布局
-        // 会触发当前onLayout方法，指定Item位置与绘制先关还是在onLayout中
-        requestLayout();
-    }
+//    /**
+//     * 控制ListView进行滚动
+//     *
+//     * @param x 当前触摸点X轴的值
+//     */
+//    private void scrollList(int x) { // scrollIfNeeded
+//        // 当前手指坐在位置与刚触摸到屏幕之间的距离
+//        // 也就是当前手指在屏幕上Y轴总移动位置
+//        // int scrolledDistance = x - mTouchStartX;
+//        // 改变当前记录的ListView顶部位置
+//        // mListLeft = mListLeftStart + scrolledDistance;
+//
+//        // 关键，要想使相面的计算生效必须重新请求布局
+//        // 会触发当前onLayout方法，指定Item位置与绘制先关还是在onLayout中
+//        requestLayout();
+//    }
 
     /**
      * ListView向上或者向下移动后需要向顶部或者底部添加视图
@@ -276,12 +258,12 @@ public class HorizonListView extends AdapterView<Adapter> {
      * 与fillListDown相反方向添加
      *
      * @param leftEdge 当前第一个子视图顶部边界值
-     * @param offset 显示区域偏移量
+     * @param offset   显示区域偏移量
      */
     private void fillListUp(int leftEdge, int offset) {
         while (leftEdge + offset > 0 && mFirstItemPosition > 0) {
             // 现在添加的视图时当前子视图后面，所以位置+1
-            mLastItemPosition--;
+            mFirstItemPosition--;
 
             View newTopChild = mAdapter.getView(mFirstItemPosition, getCachedView(), this);
             addAndMeasureChild(newTopChild, LAYOUT_MODE_LEFT);
@@ -294,55 +276,9 @@ public class HorizonListView extends AdapterView<Adapter> {
     }
 
     private void startTouch(MotionEvent event) {
-        mMotionX = mTouchStartX = (int) event.getX();
-
+        mTouchStartX = (int) event.getX();
+        mTouchStartY = (int) event.getY();
         mListLeftStart = getChildAt(0).getLeft() - mListLeftOffset;
-
-        startLongPressCheck();
-
-        mTouchMode = TOUCH_MODE_DOWN;
-    }
-
-    private void endTouch() {
-
-    }
-
-    private boolean startScrollIfNeeded(int x) {
-        final int deltaX = x - mMotionX;
-        final int distance = Math.abs(deltaX);
-
-        if (distance > mTouchSlop) {
-            mTouchMode = TOUCH_MODE_SCROLL;
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * 开启异步线程，条件允许时调用LongClickListener
-     */
-    private void startLongPressCheck() {
-        // 创建子线程
-        if (mLongPressRunnable == null) {
-            mLongPressRunnable = new Runnable() {
-
-                @Override
-                public void run() {
-                    if (mTouchMode == TOUCH_MODE_DOWN) {
-                        final int index = getContainingChildIndex(
-                                mTouchStartX, mTouchStartY);
-                        if (index != INVALID_INDEX) {
-                            longClickChild(index);
-                        }
-                    }
-                }
-            };
-        }
-
-        // ViewConfiguration.getLongPressTimeout() 获取系统配置的长按的时间间隔
-        // 如果点击已经超过长按要求时间，才开始执行此线程
-        postDelayed(mLongPressRunnable, ViewConfiguration.getLongPressTimeout());
     }
 
     /**
@@ -394,10 +330,10 @@ public class HorizonListView extends AdapterView<Adapter> {
         /**  ListView向上滚动，删除顶部移除可视区域的所有视图  **/
 
         // 不在ListView底部，子视图大于1
-        if (mLastItemPosition != mAdapter.getCount() -1 && childCount > 1) {
+        if (mLastItemPosition != mAdapter.getCount() - 1 && childCount > 1) {
             View firstChild = getChildAt(0);
             // 通过第二条件判断当前最上面的视图是否被移除可是区域
-            while (firstChild != null && firstChild.getBottom() + offset < 0) {
+            while (firstChild != null && firstChild.getRight() + offset < 0) {
                 // 既然顶部第一个视图已经移除可视区域从当前ViewGroup中删除掉
                 removeViewInLayout(firstChild);
                 // 用于下次判断，是否当前顶部还有需要移除的视图
@@ -407,7 +343,7 @@ public class HorizonListView extends AdapterView<Adapter> {
                 // 既然最上面的视图被干掉了，当前ListView第一个显示视图也需要+1
                 mFirstItemPosition++;
                 // 同上更新
-                mListLeftOffset += firstChild.getMeasuredHeight();
+                mListLeftOffset += firstChild.getMeasuredWidth();
 
                 // 为下一次while遍历获取参数
                 if (childCount > 1) {
@@ -425,7 +361,7 @@ public class HorizonListView extends AdapterView<Adapter> {
         // 与上面操作一样，只是方向相反一个顶部操作一个底部操作
         if (mFirstItemPosition != 0 && childCount > 1) {
             View lastChild = getChildAt(childCount - 1);
-            while (lastChild != null && lastChild.getTop() + offset > getHeight()) {
+            while (lastChild != null && lastChild.getLeft() + offset > getWidth()) {
                 removeViewInLayout(lastChild);
                 childCount--;
                 mCachedItemViews.addLast(lastChild);
@@ -469,6 +405,74 @@ public class HorizonListView extends AdapterView<Adapter> {
         }
 
         return INVALID_POSITION;
+    }
+
+    class GestureListener extends GestureDetector.SimpleOnGestureListener {
+        public GestureListener() {
+            super();
+        }
+
+        @Override
+        public boolean onDown(MotionEvent e) {
+            Log.d("HorizonListView", "onDown()");
+            startTouch(e);
+            return true;
+        }
+
+        @Override
+        public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+            Log.d("HorizonListView", "onScroll()");
+            mListLeft -= distanceX;
+            requestLayout();
+            return super.onScroll(e1, e2, distanceX, distanceY);
+
+        }
+
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+            Log.d("HorizonListView", "onFling()");
+            scroller.fling(mListLeft, 0, (int) velocityX, 0, 0, 0, maxX, 0);
+            requestLayout();
+            return true;
+        }
+
+        @Override
+        public boolean onSingleTapConfirmed(MotionEvent e) {
+            Log.d("HorizonListView", "onSingleTapConfirmed()");
+            clickChildAt((int) e.getX(), (int) e.getY());
+            return true;
+        }
+
+        @Override
+        public void onLongPress(MotionEvent e) {
+            Log.d("HorizonListView", "onLongPress()");
+            final int index = getContainingChildIndex(
+                    mTouchStartX, mTouchStartY);
+            if (index != INVALID_INDEX) {
+                longClickChild(index);
+            }
+        }
+
+        @Override
+        public boolean onSingleTapUp(MotionEvent e) {
+            Log.d("HorizonListView", "onSingleTapUp()");
+            return super.onSingleTapUp(e);
+        }
+
+        @Override
+        public void onShowPress(MotionEvent e) {
+            super.onShowPress(e);
+        }
+
+        @Override
+        public boolean onDoubleTap(MotionEvent e) {
+            return super.onDoubleTap(e);
+        }
+
+        @Override
+        public boolean onDoubleTapEvent(MotionEvent e) {
+            return super.onDoubleTapEvent(e);
+        }
     }
 
 }

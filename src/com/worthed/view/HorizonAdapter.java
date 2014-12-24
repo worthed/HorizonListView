@@ -54,7 +54,7 @@ public class HorizonAdapter extends BaseAdapter {
 
         Log.d("HorizonListView", "getView() position : " + position);
         if (convertView == null) {
-            convertView = mInflater.inflate(R.layout.list_item, null);
+            convertView = mInflater.inflate(R.layout.list_item, parent, false);
         }
 
         TextView name = (TextView) convertView.findViewById(R.id.tv_name);
