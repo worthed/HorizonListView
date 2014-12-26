@@ -25,7 +25,7 @@ public class DemoActivity extends Activity implements AdapterView.OnItemClickLis
 
         Log.d("HorizonListView", "onCreate()");
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.main);
+        setContentView(R.layout.activity_demo);
         horizon_list_view = (HorizonListView) findViewById(R.id.horizon_list_view);
 
         resIdList = new ArrayList<Integer>();
