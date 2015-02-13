@@ -1,5 +1,6 @@
 HorizonListView
 ===============
+@Deprated
 
 Android水平ListView
 
